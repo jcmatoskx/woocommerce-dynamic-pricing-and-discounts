@@ -12,27 +12,14 @@ if (!defined('ABSPATH')) {
  * @package WooCommerce Dynamic Pricing & Discounts
  * @author RightPress
  */
-if (!class_exists('RP_WCDPD_Promotion_Volume_Pricing_Table')) {
-
 class RP_WCDPD_Promotion_Volume_Pricing_Table
 {
 
-    // Singleton instance
-    protected static $instance = false;
+    // Singleton control
+    protected static $instance = false; public static function get_instance() { return self::$instance ? self::$instance : (self::$instance = new self()); }
 
     /**
-     * Singleton control
-     */
-    public static function get_instance()
-    {
-        if (!self::$instance) {
-            self::$instance = new self();
-        }
-        return self::$instance;
-    }
-
-    /**
-     * Constructor class
+     * Constructor
      *
      * @access public
      * @return void
@@ -107,6 +94,17 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
                         ),
                     ),
                 ),
+                'promo_volume_pricing_table_value_to_display' => array(
+                    'title'     => __('Value to display', 'rp_wcdpd'),
+                    'type'      => 'select',
+                    'default'   => 'price',
+                    'required'  => true,
+                    'options'   => array(
+                        'price'                 => __('Discounted price', 'rp_wcdpd'),
+                        'discount_amount'       => __('Discount amount', 'rp_wcdpd'),
+                        'discount_percentage'   => __('Discount percentage', 'rp_wcdpd'),
+                    ),
+                ),
                 'promo_volume_pricing_table_missing_ranges' => array(
                     'title'     => __('Undefined quantity handling', 'rp_wcdpd'),
                     'type'      => 'select',
@@ -141,13 +139,14 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
      */
     public function set_up_promotion_tool()
     {
+
+        // Load includes
+        require_once 'includes/functions.php';
+
         // Check this promotion tool is active
         if (!RP_WCDPD_Settings::get('promo_volume_pricing_table')) {
             return;
         }
-
-        // Load includes
-        require_once 'includes/functions.php';
 
         // Add hook
         add_action(RP_WCDPD_Settings::get('promo_volume_pricing_table_position'), array($this, 'maybe_display_pricing_table_hook'));
@@ -201,7 +200,7 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
                         'product'       => $product,
                         'rule'          => $rule,
                         'table_data'    => $table_data,
-                    )), false);
+                    )), $product, false);
                 }
             }
         }
@@ -210,7 +209,7 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
 
             // Switch to variable product if we got product variation
             if ($product->is_type('variation')) {
-                $product = RightPress_WC_Legacy::product_variation_get_parent($product);
+                $product = wc_get_product($product->get_parent_id());
             }
 
             $variation_rules = array();
@@ -241,7 +240,7 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
 
             // Display table
             if (!empty($variation_rules) && $available_variations) {
-                self::display_pricing_table($variation_rules, true);
+                self::display_pricing_table($variation_rules, $product, true);
             }
         }
     }
@@ -296,7 +295,7 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
         foreach ($data as $single) {
             if (!empty($single['rule']['conditions'])) {
                 foreach ($single['rule']['conditions'] as $condition) {
-                    if (RP_WCDPD_Conditions::is_type($condition, array('product__variation', 'product__attributes', 'product_property__regular_price', 'product_property__on_sale', 'product_property__stock_quantity', 'product_property__meta'))) {
+                    if (RP_WCDPD_Controller_Conditions::is_type($condition, array('product__variation', 'product__attributes', 'product_property__regular_price', 'product_property__on_sale', 'product_property__stock_quantity', 'product_property__meta'))) {
                         return false;
                     }
                 }
@@ -311,13 +310,22 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
      *
      * @access public
      * @param array $data
+     * @param object $product
      * @param bool $is_variable
      * @return void
      */
-    public static function display_pricing_table($data, $is_variable)
+    public static function display_pricing_table($data, $product, $is_variable)
     {
+        // Allow developers to abort
+        if (!apply_filters('rp_wcdpd_volume_pricing_table_display', true, $data, $product, $is_variable)) {
+            return;
+        }
+
         // Get table layout
         $layout = RP_WCDPD_Settings::get('promo_volume_pricing_table_layout');
+
+        // Get table title
+        $title = apply_filters('rp_wcdpd_volume_pricing_table_title', RP_WCDPD_Settings::get('promo_volume_pricing_table_title'), $product, $data, $is_variable);
 
         // Display one pricing table for simple product or variable product with equal prices
         if (!$is_variable || (self::variation_prices_match($data) && self::rule_always_applies_to_all_variations($data) && RP_WCDPD_Settings::get('promo_volume_pricing_table_variation_layout') === 'multiple')) {
@@ -327,13 +335,13 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
             $is_variable = false;
 
             // Display table
-            RightPress_Helper::include_extension_template('promotion-volume-pricing-table', $layout, RP_WCDPD_PLUGIN_PATH, RP_WCDPD_PLUGIN_KEY, array('data' => array($single)));
+            RightPress_Help::include_extension_template('promotion-volume-pricing-table', $layout, RP_WCDPD_PLUGIN_PATH, RP_WCDPD_PLUGIN_KEY, array('title' => $title, 'data' => array($single)));
         }
         // Display one table for all variations
         else if (RP_WCDPD_Settings::get('promo_volume_pricing_table_variation_layout') === 'single') {
 
             // Display table
-            RightPress_Helper::include_extension_template('promotion-volume-pricing-table', $layout, RP_WCDPD_PLUGIN_PATH, RP_WCDPD_PLUGIN_KEY, array('data' => $data));
+            RightPress_Help::include_extension_template('promotion-volume-pricing-table', $layout, RP_WCDPD_PLUGIN_PATH, RP_WCDPD_PLUGIN_KEY, array('title' => $title, 'data' => $data));
         }
         // Display multiple individual tables for multiple variations
         else {
@@ -350,10 +358,10 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
                 }
 
                 // Open variation container
-                echo '<div id="rp_wcdpd_pricing_table_variation_' . RightPress_WC_Legacy::product_get_id($single['product']) . '" class="rp_wcdpd_pricing_table_variation">';
+                echo '<div id="rp_wcdpd_pricing_table_variation_' . $single['product']->get_id() . '" class="rp_wcdpd_pricing_table_variation">';
 
                 // Display table
-                RightPress_Helper::include_extension_template('promotion-volume-pricing-table', $layout, RP_WCDPD_PLUGIN_PATH, RP_WCDPD_PLUGIN_KEY, array('data' => array($single)));
+                RightPress_Help::include_extension_template('promotion-volume-pricing-table', $layout, RP_WCDPD_PLUGIN_PATH, RP_WCDPD_PLUGIN_KEY, array('title' => $title, 'data' => array($single)));
 
                 // Close variation container
                 echo '</div>';
@@ -364,7 +372,7 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
         }
 
         // Inject styles
-        RightPress_Helper::inject_stylesheet('rp-wcdpd-promotion-volume-pricing-table-styles', RP_WCDPD_PLUGIN_URL . '/extensions/promotion-volume-pricing-table/assets/styles.css', RP_WCDPD_VERSION);
+        RightPress_Help::inject_stylesheet('rp-wcdpd-promotion-volume-pricing-table-styles', RP_WCDPD_PLUGIN_URL . '/extensions/promotion-volume-pricing-table/assets/styles.css', RP_WCDPD_VERSION);
 
         // Inject script in place for Ajax requests (normally Product Quick View type of requests)
         if (is_ajax()) {
@@ -389,8 +397,15 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
      */
     public static function get_applicable_volume_rule($product)
     {
+        // Get matching rules
         if ($matched_rules = RP_WCDPD_Product_Pricing::get_applicable_rules_for_product($product, array('bulk', 'tiered'), false, array('RP_WCDPD_Promotion_Volume_Pricing_Table', 'get_reference_amount_for_table'))) {
-            return array_shift($matched_rules);
+
+            // Get applicable rule
+            $applicable_rules = array_values($matched_rules);
+            $applicable_rule = array_shift($applicable_rules);
+
+            // Allow developers to override and return
+            return apply_filters('rp_wcdpd_volume_pricing_table_applicable_rule', $applicable_rule, $matched_rules, $product);
         }
 
         return false;
@@ -446,21 +461,21 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
         $data = array();
 
         // Set flag
-        RP_WCDPD_Controller_Methods_Product_Pricing::start_test();
+        RightPress_Product_Price_Test::test_started();
 
         // Get product price
         $regular_price = $product->get_regular_price();
         $final_price = $product->get_price();
 
         // Remove flag
-        RP_WCDPD_Controller_Methods_Product_Pricing::end_test();
+        RightPress_Product_Price_Test::test_ended();
 
         // Get quantity ranges
         $quantity_ranges = $rule['quantity_ranges'];
 
         // Maybe add missing ranges
         if (RP_WCDPD_Settings::get('promo_volume_pricing_table_missing_ranges') === 'display') {
-            $quantity_ranges = self::add_missing_ranges($quantity_ranges, $product);
+            $quantity_ranges = RP_WCDPD_Pricing::add_volume_pricing_rule_missing_quantity_ranges($quantity_ranges);
         }
 
         // Get data for each quantity range
@@ -495,94 +510,38 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
             // Calculate price
             $price = RP_WCDPD_Pricing::adjust_amount($price_to_adjust, $quantity_range['pricing_method'], $pricing_value);
 
+            // Display discount amount
+            if (RP_WCDPD_Settings::get('promo_volume_pricing_table_value_to_display') === 'discount_amount') {
+                $raw_value = $price - $price_to_adjust;
+                $sign = $raw_value <= 0 ? '-' : '+';
+                $display_value = apply_filters('rp_wcdpd_volume_pricing_table_range_discount_amount', ($sign . wc_price(wc_get_price_to_display($product, array('qty' => 1, 'price' => abs($raw_value))))), $product, $rule, $quantity_range, $price, $raw_value);
+            }
+            // Display discount percentage
+            else if (RP_WCDPD_Settings::get('promo_volume_pricing_table_value_to_display') === 'discount_percentage') {
+                $raw_value = 100 - ($price / $price_to_adjust) * 100;
+                $sign = $raw_value >= 0 ? '-' : '+';
+                $display_value = apply_filters('rp_wcdpd_volume_pricing_table_range_discount_percentage', ($sign . round($raw_value, 2) . '%'), $product, $rule, $quantity_range, $raw_value);
+            }
+            // Display discounted price (separate filter maintained for backwards compatibility before issue #454 was fixed)
+            else {
+                $display_value = apply_filters('rp_wcdpd_volume_pricing_table_range_price', wc_price(wc_get_price_to_display($product, array('qty' => 1, 'price' => $price))), $product, $rule, $quantity_range, $price);
+                $raw_value = $price;
+				$raw_valueper = 100 - ($price / $price_to_adjust) * 100;
+				$display_valueper = apply_filters('rp_wcdpd_volume_pricing_table_range_discount_percentage', ( round($raw_valueper, 2) . '%'), $product, $rule, $quantity_range, $raw_valueper);
+            }
+
             // Add to array
             $data[] = array(
                 'range_label'   => apply_filters('rp_wcdpd_volume_pricing_table_range_label', $label, $product, $rule, $quantity_range),
-                'range_price'   => apply_filters('rp_wcdpd_volume_pricing_table_range_price', wc_price(RightPress_WC_Legacy::product_get_display_price($product, $price)), $product, $rule, $quantity_range, $price),
-                'price_raw'     => $price,
+                'range_price'   => apply_filters('rp_wcdpd_volume_pricing_table_range_value', $display_value, $raw_value, $product, $rule, $quantity_range),
+				'range_per'   => apply_filters('rp_wcdpd_volume_pricing_table_range_per', $display_valueper, $raw_value, $product, $rule, $quantity_range),
+                'price_raw'     => $raw_value,
                 'from'          => $from,
             );
         }
 
         // Allow developers to make changes and return
         return apply_filters('rp_wcdpd_volume_pricing_table_data', $data, $product, $rule);
-    }
-
-    /**
-     * Add missing quantity ranges (gaps in continuity)
-     *
-     * @access public
-     * @param array $quantity_ranges
-     * @param object $product
-     * @return array
-     */
-    public static function add_missing_ranges($quantity_ranges, $product)
-    {
-        $fixed = array();
-
-        // Check if product uses decimal quantities
-        $decimal_quantities = RP_WCDPD_Settings::get('decimal_quantities') && RightPress_Helper::wc_product_uses_decimal_quantities($product);
-
-        // Get quantity step
-        $quantity_step = $decimal_quantities ? RightPress_Helper::get_wc_product_quantity_step($product) : 1;
-
-        $last_from = null;
-        $last_to = null;
-
-        $count = count($quantity_ranges);
-        $i = 1;
-
-        foreach ($quantity_ranges as $quantity_range) {
-
-            // Get from and to
-            $from = $quantity_range['from'];
-            $to = $quantity_range['to'];
-
-            // Maybe add first range
-            if ($last_from === null && $from > $quantity_step) {
-                $fixed[] = self::get_missing_range($quantity_step, ($from - $quantity_step));
-            }
-
-            // Gap between last to and current from
-            if ($last_to !== null && ($from - $last_to) > $quantity_step) {
-                $fixed[] = self::get_missing_range(($last_to + $quantity_step), ($from - $quantity_step));
-            }
-
-            // Add current range
-            $fixed[] = $quantity_range;
-
-            // Set last from and to
-            $last_from = $from;
-            $last_to = $to;
-
-            $i++;
-        }
-
-        // Add closing range
-        if ($last_to !== null) {
-            $fixed[] = self::get_missing_range(($last_to + $quantity_step), null);
-        }
-
-        return $fixed;
-    }
-
-    /**
-     * Get missing quantity range
-     *
-     * @access public
-     * @param int $from
-     * @param int $to
-     * @return array
-     */
-    public static function get_missing_range($from, $to)
-    {
-        return array(
-            'from'              => $from,
-            'to'                => $to,
-            'pricing_method'    => 'discount__amount',
-            'pricing_value'     => 0,
-            'is_missing_range'  => true,
-        );
     }
 
     /**
@@ -633,5 +592,3 @@ class RP_WCDPD_Promotion_Volume_Pricing_Table
 }
 
 RP_WCDPD_Promotion_Volume_Pricing_Table::get_instance();
-
-}
